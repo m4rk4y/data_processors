@@ -20,19 +20,20 @@
 // called for some TCP/IP code to talk to a real server, and that's quite
 // fiddly and time-consuming, not to mention algorithmically uninteresting for
 // the purpose of this exercise. I would also have to build and run a server
-// too.) Instead there is a hard-coded representation of an example DAG,
-// invoked by buildServerTree(), and a fake server, invoked by getResponse().
-// Obviously I should invent a DAG syntax (or in fact use GraphViz?) and some
-// code to read it.
+// too.) Instead, buildServerTree() reads in a set of directed edges from a
+// file and builds a local DAG representation; then the "client" talks to a
+// fake server by calling getResponse().
 //
 // Post-process the output with e.g.
 // dot -Tjpg out.txt > out.jpg
 
-#include <time.h>
+// #include <time.h>
 
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <set>
+#include <sstream>
 #include <string>
 
 using namespace std;
@@ -97,77 +98,71 @@ static map<string,Node*> visitedNodes;
 
 static Node startServerNode ( "START" );
 static Node * currentServerNode = &startServerNode;
-static void buildServerTree()
+static map<string,Node*> dagNodes;
+
+static Node * findOrCreateDagNode ( const string & nodeName )
 {
-    // Construct:
-    //             /-3- g -2-\ /--3-- f -1-\
-    //  START -0- a -0- c -2- e -----2----- END
-    //        \2- b ----0----/             /
-    //            \_______1_______________/
+    map<string,Node*>::iterator iter = dagNodes.find ( nodeName );
+    Node * node;
+    if ( iter != dagNodes.end() )
+    {
+        node = iter->second;
+    }
+    else
+    {
+        node = new Node ( nodeName.c_str() );
+        dagNodes.insert ( pair<string,Node*> ( node->m_name, node ) );
+        clog << "Created DAG node " << node << " with name " << node->m_name << endl;
+    }
+    return node;
+}
 
-    Node * a = new Node ( "a" );
-    Node * b = new Node ( "b" );
-    Node * c = new Node ( "c" );
-    Node * d = new Node ( "d" );
-    Node * e = new Node ( "e" );
-    Node * f = new Node ( "f" );
-    Node * g = new Node ( "g" );
-    Node * h = new Node ( "h" );
-    clog << "startServerNode is " << &startServerNode << endl;
-    clog << "Start node is " << &startNode << endl;
-    clog << "End node is " << &endNode << endl;
-    clog << "Created server node " << a << " with name " << a->m_name << endl;
-    clog << "Created server node " << b << " with name " << b->m_name << endl;
-    clog << "Created server node " << c << " with name " << c->m_name << endl;
-    clog << "Created server node " << d << " with name " << d->m_name << endl;
-    clog << "Created server node " << e << " with name " << e->m_name << endl;
-    clog << "Created server node " << f << " with name " << f->m_name << endl;
-    clog << "Created server node " << g << " with name " << g->m_name << endl;
-    clog << "Created server node " << h << " with name " << h->m_name << endl;
+static bool buildServerTree ( const char * fileName )
+{
+    ifstream file;
+    file.open ( fileName, ios::in );
+    if ( ! file.is_open() )
+    {
+        cerr << "Failed to open " << fileName << " for reading" << endl;
+        return false;
+    }
 
-    Edge * s_to_a = new Edge;
-    s_to_a->m_to = a;
-    startServerNode.m_edges[0] = s_to_a;
+    dagNodes.insert ( pair<string,Node*> ( startServerNode.m_name, &startServerNode ) );
 
-    Edge * s_to_b = new Edge;
-    s_to_b->m_to = b;
-    startServerNode.m_edges[2] = s_to_b;
-
-    Edge * a_to_c = new Edge;
-    a_to_c->m_to = c;
-    a->m_edges[0] = a_to_c;
-
-    Edge * c_to_e = new Edge;
-    c_to_e->m_to = e;
-    c->m_edges[2] = c_to_e;
-
-    Edge * b_to_e = new Edge;
-    b_to_e->m_to = e;
-    b->m_edges[0] = b_to_e;
-
-    Edge * e_to_end = new Edge;
-    e_to_end->m_to = &endNode;
-    e->m_edges[2] = e_to_end;
-
-    Edge * b_to_end = new Edge;
-    b_to_end->m_to = &endNode;
-    b->m_edges[1] = b_to_end;
-
-    Edge * e_to_f = new Edge;
-    e_to_f->m_to = f;
-    e->m_edges[3] = e_to_f;
-
-    Edge * f_to_end = new Edge;
-    f_to_end->m_to = &endNode;
-    f->m_edges[1] = f_to_end;
-
-    Edge * a_to_g = new Edge;
-    a_to_g->m_to = g;
-    a->m_edges[3] = a_to_g;
-
-    Edge * g_to_e = new Edge;
-    g_to_e->m_to = e;
-    g->m_edges[2] = g_to_e;
+    // There is no check here for there being an END, or the whole thing being
+    // acyclic.
+    string fileLine;
+    while ( getline ( file, fileLine ) )
+    {
+        istringstream parser ( fileLine );
+        string from;
+        string label;
+        string to;
+        parser >> from >> label >> to;
+        if ( from == "//" || from == "#" )  // comment-line
+        {
+            continue;
+        }
+        if ( from.empty() )
+        {
+            continue;   // blank line
+        }
+        int edgeIndex = atoi ( label.c_str() );
+        if ( edgeIndex < 0 || edgeIndex > 3 )
+        {
+            cerr << "invalid edge index " << edgeIndex << " seen in line \"" << fileLine << "\"" << endl;
+            file.close();
+            return false;
+        }
+        Node * fromNode = findOrCreateDagNode ( from );
+        Node * toNode = findOrCreateDagNode ( to );
+        clog << "Set DAG " << fromNode->m_name << " edge " << label << " to point to " << toNode->m_name << endl;
+        Edge * edge = new Edge;
+        edge->m_to = toNode;
+        fromNode->m_edges[edgeIndex] = edge;
+    }
+    file.close();
+    return true;
 }
 
 static string getResponse ( const string & request )
@@ -342,19 +337,22 @@ static bool drawGraph ( const char * fileName )
 
 extern int main ( int argc, char ** argv )
 {
-    if ( argc < 2 )
+    if ( argc < 3 )
     {
-        cerr << "Error: needs <filename> [ -v ]" << endl;
+        cerr << "Error: needs <input-filename> <output-filename> [ -v ]" << endl;
         return 1;
     }
     // If -v not seen then suppress logging.
-    if ( argc < 3 || strcmp ( argv[2], "-v" ) != 0 )
+    if ( argc < 4 || strcmp ( argv[3], "-v" ) != 0 )
     {
         clog.setstate ( ios_base::badbit );
     }
 
     // Build tree for testing.
-    buildServerTree();
+    if ( ! buildServerTree ( argv[1] ) )
+    {
+        return 1;
+    }
 
     // Avoid duplicating START and END nodes.
     visitedNodes.insert ( pair<string,Node*> ( startNode.m_name, &startNode ) );
@@ -369,11 +367,13 @@ extern int main ( int argc, char ** argv )
         endNode.m_edges[inx] = edge;
     }
 
+    // Explore the DAG.
     while ( explore ( &startNode ) )
     {
         string dummy = getResponse ( "RESET" );
         clog << "response was " << dummy << endl;
     }
 
-    return drawGraph ( argv[1] ) ? 0 : 1;
+    // Output the DAG in GraphViz format.
+    return drawGraph ( argv[2] ) ? 0 : 1;
 }

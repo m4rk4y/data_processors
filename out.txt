@@ -1,0 +1,13 @@
+digraph G {
+START -> a [ label = "0" ];
+a -> c [ label = "0" ];
+c -> e [ label = "2" ];
+e -> END [ label = "2" ];
+e -> f [ label = "3" ];
+f -> END [ label = "1" ];
+a -> g [ label = "3" ];
+g -> e [ label = "2" ];
+START -> b [ label = "2" ];
+b -> e [ label = "0" ];
+b -> END [ label = "1" ];
+}
